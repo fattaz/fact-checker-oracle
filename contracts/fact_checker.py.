@@ -1,0 +1,68 @@
+# { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6" }
+from genlayer import *
+
+class FactCheckerOracle(gl.Contract):
+    """
+    Decentralized AI Fact-Checking Oracle.
+    Fetches real-time web content and uses consensus-driven LLM evaluation 
+    to verify arbitrary natural language claims on-chain.
+    """
+    total_claims: u256
+    claims: TreeMap[str, str]
+
+    def __init__(self):
+        # Initialize counter
+        self.total_claims = u256(0)
+
+    @gl.public.write
+    def verify_claim(self, claim_id: str, claim_text: str, source_url: str) -> str:
+        """
+        Fetches webpage data, evaluates the claim via LLM, and uses
+        GenLayer equivalence checks to achieve consensus across validators.
+        """
+        # Non-deterministic block: runs web scraping & LLM execution
+        def fetch_and_evaluate() -> str:
+            # 1. Fetch web page in plain text mode
+            page_text = gl.nondet.web.render(source_url, mode="text")
+            
+            # Cap text length to stay within model context window limits
+            trimmed_content = page_text[:2000]
+
+            # 2. Build structured evaluation prompt
+            prompt = f"""
+            Act as an impartial fact-checking auditor. 
+            Determine whether the provided Web Content supports or contradicts the Target Claim.
+
+            Target Claim: "{claim_text}"
+
+            Web Content Snippet:
+            ---
+            {trimmed_content}
+            ---
+
+            Respond ONLY with a JSON object in this exact schema:
+            {{"verdict": "VERIFIED_TRUE" | "VERIFIED_FALSE" | "INCONCLUSIVE", "confidence": "HIGH" | "MEDIUM" | "LOW"}}
+            """
+
+            # 3. Call LLM prompt via GenVM
+            response = gl.nondet.exec_prompt(prompt)
+            return response.strip()
+
+        # Execute equivalence check across validators to ensure network agreement
+        consensus_verdict = gl.eq_principle.strict_eq(fetch_and_evaluate)
+
+        # Store consensus result on-chain
+        self.claims[claim_id] = consensus_verdict
+        self.total_claims = self.total_claims + u256(1)
+
+        return consensus_verdict
+
+    @gl.public.view
+    def get_claim(self, claim_id: str) -> str:
+        """Read-only view method to check a claim verdict."""
+        return self.claims.get(claim_id, "CLAIM_NOT_FOUND")
+
+    @gl.public.view
+    def get_total_claims(self) -> u256:
+        """Returns total claims processed by the oracle."""
+        return self.total_claims
